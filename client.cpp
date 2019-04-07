@@ -24,6 +24,7 @@ const int MAX_PAYLOAD_SIZE = 100;
 
 void error(const char* msg) {
   perror(msg);
+  printf("\n");
   exit(0);
 }
 
@@ -117,12 +118,13 @@ void connection_loop(int server_port, char* server_hostname) {
     }
 
     // check if the cube was correctly solved
-    for (int i = 0; i < MAX_PAYLOAD_SIZE; i++) {
-      if (!Permutation::equals(
-              Permutation::mult_vector(parse_moves(response_buffer)),
-              Permutation::identity()))
-        error("ERROR cube was not solved correctly");
+    auto moves = parse_moves(response_buffer);
+    for (int i = 0; i < moves.size(); i++) {
+      p = Permutation::mult(p, moves[i]);
     }
+
+    if (!Permutation::equals(p, Permutation::identity()))
+      error("ERROR cube was not solved correctly");
 
     close(sockfd);
     return;
@@ -135,8 +137,7 @@ int main(int argc, char* argv[]) {
   int client_count;
 
   if (argc < 4) {
-    fprintf(stderr,
-            "usage %s server_hostname server_port client_count\n",
+    fprintf(stderr, "usage %s server_hostname server_port client_count\n",
             argv[0]);
     exit(0);
   }
