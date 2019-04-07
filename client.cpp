@@ -108,8 +108,9 @@ void connection_loop(int server_port, char* server_hostname) {
     }
     payload_buffer[hash.length()] = '\0';
 
-    if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+    if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
       error("ERROR connecting");
+    }
 
     if (write(sockfd, payload_buffer, strlen(payload_buffer)) < 0) {
       error("ERROR writing to socket");
@@ -125,8 +126,9 @@ void connection_loop(int server_port, char* server_hostname) {
       p = Permutation::mult(p, moves[i]);
     }
 
-    if (!Permutation::equals(p, Permutation::identity()))
+    if (!Permutation::equals(p, Permutation::identity())) {
       error("ERROR cube was not solved correctly");
+    }
 
     close(sockfd);
     return;

@@ -40,10 +40,7 @@ struct sockaddr_in preconnection_setup(int server_port) {
 void start_server(int server_port, PruningTable* pruning_table) {
   struct sockaddr_in serv_addr;
   int serversockfd;
-  struct sockaddr_in client_addr;
   int clientsockfd;
-  socklen_t clientlength;
-
   serv_addr = preconnection_setup(server_port);
 
   serversockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -60,9 +57,8 @@ void start_server(int server_port, PruningTable* pruning_table) {
   // the solver should be unique per thread (when threads are implemented)
   auto solver = CubeSolver(pruning_table);
 
-  while (1) {
-    clientsockfd =
-        accept(serversockfd, (struct sockaddr*)&client_addr, &clientlength);
+  while (true) {
+    clientsockfd = accept(serversockfd, NULL, 0);
 
     if (clientsockfd < 0) {
       error("ERROR on accept");
