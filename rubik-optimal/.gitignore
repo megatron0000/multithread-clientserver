@@ -1,0 +1,9 @@
+kociemba.org/
+*.out
+*.bin
+src/build/*
+src/test.cpp
+src/node_modules
+electron-bin
+*.zip
+*.pdf

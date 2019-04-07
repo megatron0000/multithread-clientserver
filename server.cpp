@@ -1,8 +1,9 @@
 /**
- * Usage: ./server server_port payload_size
- * 
- * Creates a server listening on `server_port` that accepts payloads from clients
- * and echoes the payload back to them.
+ * Usage: ./server server_port
+ *
+ * Creates a server listening on `server_port` that accepts payloads from
+ * clients containing a hash of a rubik cube. The server finds the moves
+ * necessary to solve the cube and sends them back to the client.
  */
 
 #include <netinet/in.h>
@@ -13,8 +14,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "rubik-optimal/src/hash.cpp"
+#include "rubik-optimal/src/solve.cpp"
+
 // value read from /proc/sys/net/core/somaxconn
 const int MAX_CONNECTION_QUEUE = 128;
+const int MAX_PAYLOAD_SIZE = 100;
 
 void error(const char* msg) {
   perror(msg);
@@ -32,7 +37,7 @@ struct sockaddr_in preconnection_setup(int server_port) {
   return serv_addr;
 }
 
-void start_server(int server_port, int payload_size) {
+void start_server(int server_port, PruningTable* pruning_table) {
   struct sockaddr_in serv_addr;
   int serversockfd;
   struct sockaddr_in client_addr;
@@ -52,6 +57,9 @@ void start_server(int server_port, int payload_size) {
 
   listen(serversockfd, MAX_CONNECTION_QUEUE);
 
+  // the solver should be unique per thread (when threads are implemented)
+  auto solver = CubeSolver(pruning_table);
+
   while (1) {
     clientsockfd =
         accept(serversockfd, (struct sockaddr*)&client_addr, &clientlength);
@@ -62,11 +70,26 @@ void start_server(int server_port, int payload_size) {
       printf("Client connected\n");
     }
 
-    // add client to work-queue. Consumers (other threads) will handle
+    // should add client to work-queue. Consumers (other threads) will handle
     // the connection themselves and close it
-    char* buffer = malloc(payload_size * sizeof(char));
-    read(clientsockfd, buffer, payload_size);
-    write(clientsockfd, buffer, payload_size);
+    char* buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
+    read(clientsockfd, buffer, MAX_PAYLOAD_SIZE);
+
+    // solve the received cube
+    string hash = "";
+    for (int i = 0; buffer[i] != '\0'; i++) {
+      hash = hash + buffer[i];
+    }
+
+    auto scrambled_cube = Hash2Permutation(hash);
+    auto solution = solver.solve(scrambled_cube);
+
+    for (int i = 0; i < solution.move_names.length(); i++) {
+      buffer[i] = solution.move_names[i];
+    }
+    buffer[solution.move_names.length()] = '\0';
+
+    write(clientsockfd, buffer, MAX_PAYLOAD_SIZE);
     close(clientsockfd);
   }
 
@@ -75,14 +98,16 @@ void start_server(int server_port, int payload_size) {
 
 int main(int argc, char* argv[]) {
   int server_port;
-  int payload_size;
 
-  if (argc < 3) {
-    fprintf(stderr, "usage %s server_port payload_size\n", argv[0]);
+  if (argc < 2) {
+    fprintf(stderr, "usage %s server_port\n", argv[0]);
     exit(0);
   }
   server_port = atoi(argv[1]);
-  payload_size = atoi(argv[2]);
 
-  start_server(server_port, payload_size);
+  // create pruning table
+  PruningTable table;
+  table.load_from_file("./rubik-optimal/pruning_table.bin");
+
+  start_server(server_port, &table);
 }
