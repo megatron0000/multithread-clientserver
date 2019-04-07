@@ -88,8 +88,8 @@ void connection_loop(int server_port, char* server_hostname) {
 
   buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 
-  // limit to 100 requests just for now
-  int count = 100;
+  // limit to a few requests just for now
+  int count = 10;
   while (count > 0) {
     count--;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -137,7 +137,6 @@ void connection_loop(int server_port, char* server_hostname) {
     }
 
     close(sockfd);
-    return;
   }
 }
 
