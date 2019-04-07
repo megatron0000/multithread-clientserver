@@ -82,14 +82,13 @@ vector<Permutation> parse_moves(char* moves) {
 void connection_loop(int server_port, char* server_hostname) {
   struct sockaddr_in serv_addr;
   int sockfd;
-  char* payload_buffer;
-  char* response_buffer;
+  char* buffer;
 
   serv_addr = preconnection_setup(server_port, server_hostname);
 
-  payload_buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
-  response_buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
+  buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 
+  // limit to 100 requests just for now
   int count = 100;
   while (count > 0) {
     count--;
@@ -104,24 +103,29 @@ void connection_loop(int server_port, char* server_hostname) {
                                               CanonicalPermutation[R]});
     string hash = Hash(p);
     for (int i = 0; i < hash.length(); i++) {
-      payload_buffer[i] = hash[i];
+      buffer[i] = hash[i];
     }
-    payload_buffer[hash.length()] = '\0';
+    buffer[hash.length()] = '\0';
 
     if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
       error("ERROR connecting");
     }
 
-    if (write(sockfd, payload_buffer, strlen(payload_buffer)) < 0) {
+    if (write(sockfd, buffer, MAX_PAYLOAD_SIZE) < 0) {
       error("ERROR writing to socket");
     }
 
-    if (read(sockfd, response_buffer, MAX_PAYLOAD_SIZE) < 0) {
-      error("ERROR reading from socket");
-    }
+    // read one byte at a time, until receive a '\0'
+    int bytes_read = 0;
+    do {
+      if (read(sockfd, buffer + bytes_read, 1) <= 0) {
+        error("ERROR on read from socket");
+      }
+      bytes_read++;
+    } while (buffer[bytes_read - 1] != '\0');
 
     // check if the cube was correctly solved
-    auto moves = parse_moves(response_buffer);
+    auto moves = parse_moves(buffer);
     for (int i = 0; i < moves.size(); i++) {
       p = Permutation::mult(p, moves[i]);
     }

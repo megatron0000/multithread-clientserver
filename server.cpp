@@ -70,7 +70,14 @@ void start_server(int server_port, PruningTable* pruning_table) {
     // should add client to work-queue. Consumers (other threads) will handle
     // the connection themselves and close it
     char* buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
-    read(clientsockfd, buffer, MAX_PAYLOAD_SIZE);
+    // read one byte at a time, until receive a '\0'
+    int bytes_read = 0;
+    do {
+      if (read(clientsockfd, buffer + bytes_read, 1) <= 0) {
+        error("ERROR on read from socket");
+      }
+      bytes_read++;
+    } while (buffer[bytes_read - 1] != '\0');
 
     // solve the received cube
     string hash = "";
