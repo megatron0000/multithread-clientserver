@@ -93,7 +93,10 @@ void start_server(int server_port, PruningTable* pruning_table) {
     }
     buffer[solution.move_names.length()] = '\0';
 
-    write(clientsockfd, buffer, MAX_PAYLOAD_SIZE);
+    if (write(clientsockfd, buffer, MAX_PAYLOAD_SIZE) < 0) {
+      error("ERROR writing to socket");
+    }
+
     close(clientsockfd);
   }
 
