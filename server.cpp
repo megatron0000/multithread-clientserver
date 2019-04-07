@@ -64,6 +64,7 @@ void start_server(int server_port, PruningTable* pruning_table) {
       error("ERROR on accept");
     } else {
       printf("Client connected\n");
+      fflush(stdout);
     }
 
     // should add client to work-queue. Consumers (other threads) will handle
