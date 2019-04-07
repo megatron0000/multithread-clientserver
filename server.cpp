@@ -106,8 +106,11 @@ int main(int argc, char* argv[]) {
   server_port = atoi(argv[1]);
 
   // create pruning table
+  printf("Loading pruning table...");
   PruningTable table;
-  table.load_from_file("./rubik-optimal/pruning_table.bin");
+  table.allocate();
+  table.load_from_file("pruning_table.bin");
+  printf("Loaded pruning table");
 
   start_server(server_port, &table);
 }
