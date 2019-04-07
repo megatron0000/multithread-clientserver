@@ -124,6 +124,8 @@ void connection_loop(int server_port, char* server_hostname) {
       bytes_read++;
     } while (buffer[bytes_read - 1] != '\0');
 
+    printf("Client received %s\n", buffer);
+
     // check if the cube was correctly solved
     auto moves = parse_moves(buffer);
     for (int i = 0; i < moves.size(); i++) {

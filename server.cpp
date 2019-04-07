@@ -79,6 +79,8 @@ void start_server(int server_port, PruningTable* pruning_table) {
       bytes_read++;
     } while (buffer[bytes_read - 1] != '\0');
 
+    printf("Server received %s\n", buffer);
+
     // solve the received cube
     string hash = "";
     for (int i = 0; buffer[i] != '\0'; i++) {
