@@ -90,7 +90,9 @@ void connection_loop(int server_port, char* server_hostname) {
   payload_buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
   response_buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 
-  while (1) {
+  int count = 100;
+  while (count > 0) {
+    count--;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
       error("ERROR opening socket");
