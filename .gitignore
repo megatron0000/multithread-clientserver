@@ -1,3 +1,5 @@
 .vscode/
 **/*.o
 pruning_table.bin
+client
+server

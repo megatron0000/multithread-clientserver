@@ -1,3 +1,3 @@
-g++ -O3 -lpthread client.cpp -o client
-g++ -O3 -lpthread server.cpp -o server
+g++ -O3 client.cpp -o client -lpthread # -lpthread must be at the END !
+g++ -O3 server.cpp -o server -lpthread 
 echo "Done !"

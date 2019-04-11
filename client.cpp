@@ -1,16 +1,18 @@
 /**
- * Usage: ./client server_hostname server_port client_count
+ * Usage: ./client server_hostname server_port client_count requests_per_client
  *
  * Creates a client that connects to `server_hostname`:`server_port`, sends a
  * scrambled rubik cube (a hash of it) and waits for the server to return the
- * moves which should be applied to the cube to solve it
+ * moves which should be applied to the cube to solve it.
  *
- * TODO: Create multiple threads to spawn `client_count` number of
- * clients to stress server
+ * 'client_count' threads are created to establish connections, and each one
+ * connects 'requests_per_client' times to the server before exiting
+ *
  */
 
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,12 +22,13 @@
 
 #include "rubik-optimal/src/hash.cpp"
 
+#include "setdebug.h"
+
 const int MAX_PAYLOAD_SIZE = 100;
 
 void error(const char* msg) {
   perror(msg);
-  printf("\n");
-  exit(0);
+  exit(1);
 }
 
 struct sockaddr_in preconnection_setup(int server_port, char* server_hostname) {
@@ -79,7 +82,21 @@ vector<Permutation> parse_moves(char* moves) {
   return result;
 }
 
-void connection_loop(int server_port, char* server_hostname) {
+/**
+ * Each client thread will connect to the server and establish
+ * (one at a time) 'request_count' connections to it
+ *
+ */
+struct connection_loop_arg_t {
+  int server_port;
+  char* server_hostname;
+  int request_count;
+};
+
+void* connection_loop(void* args) {
+  int server_port = ((connection_loop_arg_t*)args)->server_port;
+  char* server_hostname = ((connection_loop_arg_t*)args)->server_hostname;
+  int request_count = ((connection_loop_arg_t*)args)->request_count;
   struct sockaddr_in serv_addr;
   int sockfd;
   char* buffer;
@@ -88,10 +105,8 @@ void connection_loop(int server_port, char* server_hostname) {
 
   buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 
-  // limit to a few requests just for now
-  int count = 10;
-  while (count > 0) {
-    count--;
+  while (request_count > 0) {
+    request_count--;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
       error("ERROR opening socket");
@@ -115,14 +130,7 @@ void connection_loop(int server_port, char* server_hostname) {
       error("ERROR writing to socket");
     }
 
-    // read one byte at a time, until receive a '\0'
-    int bytes_read = 0;
-    do {
-      if (read(sockfd, buffer + bytes_read, 1) <= 0) {
-        error("ERROR on read from socket");
-      }
-      bytes_read++;
-    } while (buffer[bytes_read - 1] != '\0');
+    recv(sockfd, buffer, MAX_PAYLOAD_SIZE, MSG_WAITALL);
 
     printf("Client received %s\n", buffer);
 
@@ -144,15 +152,35 @@ int main(int argc, char* argv[]) {
   char* server_hostname;
   int server_port;
   int client_count;
+  int requests_per_client;
 
-  if (argc < 4) {
-    fprintf(stderr, "usage %s server_hostname server_port client_count\n",
+  if (argc < 5) {
+    fprintf(stderr,
+            "usage %s server_hostname server_port client_count "
+            "requests_per_client\n",
             argv[0]);
     exit(0);
   }
   server_hostname = argv[1];
   server_port = atoi(argv[2]);
   client_count = atoi(argv[3]);
+  requests_per_client = atoi(argv[4]);
 
-  connection_loop(server_port, server_hostname);
+  pthread_t* threads = (pthread_t*)malloc(client_count * sizeof(pthread_t*));
+
+  connection_loop_arg_t args = {
+    server_port : server_port,
+    server_hostname : server_hostname,
+    request_count : requests_per_client
+  };
+
+  for (int i = 0; i < client_count; i++) {
+    pthread_create(&threads[i], NULL, connection_loop, &args);
+  }
+
+  for (int i = 0; i < client_count; i++) {
+    pthread_join(threads[i], NULL);
+  }
+
+  return 0;
 }

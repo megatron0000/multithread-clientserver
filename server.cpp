@@ -1,12 +1,17 @@
 /**
- * Usage: ./server server_port
+ * Usage: ./server server_port worker_count
  *
  * Creates a server listening on `server_port` that accepts payloads from
  * clients containing a hash of a rubik cube. The server finds the moves
  * necessary to solve the cube and sends them back to the client.
+ *
+ * The server creates 'worker_count' threads to handle clients. Each one
+ * loops connecting to a client, solving the rubik cube and
+ * sending the response back to the client.
  */
 
 #include <netinet/in.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +21,8 @@
 
 #include "rubik-optimal/src/hash.cpp"
 #include "rubik-optimal/src/solve.cpp"
+
+#include "setdebug.h"
 
 // value read from /proc/sys/net/core/somaxconn
 const int MAX_CONNECTION_QUEUE = 128;
@@ -37,7 +44,90 @@ struct sockaddr_in preconnection_setup(int server_port) {
   return serv_addr;
 }
 
-void start_server(int server_port, PruningTable* pruning_table) {
+/**
+ * The main thread produces client sockets to this queue.
+ * Worker threads remove clients from the queue and process them
+ */
+struct queue_t {
+  /**
+   * A lead node which does not represent a client. Its sucessors do.
+   */
+  struct queue_item_t* lead;
+  /**
+   * Just like a lead node, but for the end of the queue
+   */
+  struct queue_item_t* lead_last;
+  sem_t length;
+  sem_t mutex;
+};
+
+struct queue_item_t {
+  int clientsockfd;
+  struct queue_item_t* next;
+  struct queue_item_t* before;
+};
+
+/**
+ * Arguments for handle_client_worker function
+ */
+struct worker_args {
+  struct queue_t* client_queue;
+  PruningTable* pruning_table;
+};
+
+/**
+ * All worker threads need access to the client queue and
+ * to the same pruning table (= 1 gigabyte)
+ */
+void* handle_client_worker(void* worker_args) {
+  struct queue_t* queue = ((struct worker_args*)worker_args)->client_queue;
+  PruningTable* table = ((struct worker_args*)worker_args)->pruning_table;
+
+  auto solver = CubeSolver(table);
+
+  char* buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
+
+  while (true) {
+    // wait for a client to arrive on the queue, then remove it
+    sem_wait(&queue->length);
+    sem_wait(&queue->mutex);
+    struct queue_item_t* lead_last = queue->lead_last;
+    struct queue_item_t* oldlast = lead_last->before;
+    struct queue_item_t* newlast = oldlast->before;
+    newlast->next = lead_last;
+    lead_last->before = newlast;
+    sem_post(&queue->mutex);
+    int clientsockfd = oldlast->clientsockfd;
+    free(oldlast);
+
+    recv(clientsockfd, buffer, MAX_PAYLOAD_SIZE, MSG_WAITALL);
+
+    printf("Server received %s\n", buffer);
+
+    // solve the received cube
+    string hash = "";
+    for (int i = 0; buffer[i] != '\0'; i++) {
+      hash = hash + buffer[i];
+    }
+
+    auto scrambled_cube = Hash2Permutation(hash);
+    auto solution = solver.solve(scrambled_cube);
+
+    // write the moves found for solution of the cube
+    for (int i = 0; i < solution.move_names.length(); i++) {
+      buffer[i] = solution.move_names[i];
+    }
+    buffer[solution.move_names.length()] = '\0';
+
+    if (write(clientsockfd, buffer, MAX_PAYLOAD_SIZE) < 0) {
+      error("ERROR writing to socket");
+    }
+
+    close(clientsockfd);
+  }
+}
+
+void start_server(int server_port, int worker_queue_count) {
   struct sockaddr_in serv_addr;
   int serversockfd;
   int clientsockfd;
@@ -54,8 +144,34 @@ void start_server(int server_port, PruningTable* pruning_table) {
 
   listen(serversockfd, MAX_CONNECTION_QUEUE);
 
-  // the solver should be unique per thread (when threads are implemented)
-  auto solver = CubeSolver(pruning_table);
+  // create pruning table
+  cout << "Loading pruning table..." << endl;
+  PruningTable table;
+  table.allocate();
+  table.load_from_file("pruning_table.bin");
+  cout << "Loaded pruning table. Listening for connections on " << server_port
+       << endl;
+
+  // create client queue
+  struct queue_t queue;
+  queue.lead = (queue_item_t*)malloc(sizeof(queue_item_t));
+  queue.lead_last = (queue_item_t*)malloc(sizeof(queue_item_t));
+  queue.lead->before = NULL;
+  queue.lead->next = queue.lead_last;
+  queue.lead_last->before = queue.lead;
+  queue.lead_last->next = NULL;
+  sem_init(&queue.length, 1, 0);
+  sem_init(&queue.mutex, 1, 1);
+
+  // create worker threads
+  pthread_t* workers =
+      (pthread_t*)malloc(worker_queue_count * sizeof(pthread_t));
+  struct worker_args args;
+  args.client_queue = &queue;
+  args.pruning_table = &table;
+  for (int i = 0; i < worker_queue_count; i++) {
+    pthread_create(&workers[i], NULL, handle_client_worker, (void*)&args);
+  }
 
   while (true) {
     clientsockfd = accept(serversockfd, NULL, 0);
@@ -64,62 +180,39 @@ void start_server(int server_port, PruningTable* pruning_table) {
       error("ERROR on accept");
     } else {
       printf("Client connected\n");
-      fflush(stdout);
     }
 
-    // should add client to work-queue. Consumers (other threads) will handle
-    // the connection themselves and close it
-    char* buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
-    // read one byte at a time, until receive a '\0'
-    int bytes_read = 0;
-    do {
-      if (read(clientsockfd, buffer + bytes_read, 1) <= 0) {
-        error("ERROR on read from socket");
-      }
-      bytes_read++;
-    } while (buffer[bytes_read - 1] != '\0');
-
-    printf("Server received %s\n", buffer);
-
-    // solve the received cube
-    string hash = "";
-    for (int i = 0; buffer[i] != '\0'; i++) {
-      hash = hash + buffer[i];
-    }
-
-    auto scrambled_cube = Hash2Permutation(hash);
-    auto solution = solver.solve(scrambled_cube);
-
-    for (int i = 0; i < solution.move_names.length(); i++) {
-      buffer[i] = solution.move_names[i];
-    }
-    buffer[solution.move_names.length()] = '\0';
-
-    if (write(clientsockfd, buffer, MAX_PAYLOAD_SIZE) < 0) {
-      error("ERROR writing to socket");
-    }
-
-    close(clientsockfd);
+    // enqueue client (a worker will pick it up)
+    sem_wait(&queue.mutex);
+    struct queue_item_t* newclient =
+        (struct queue_item_t*)malloc(sizeof(struct queue_item_t));
+    struct queue_item_t* current_first = queue.lead->next;
+    newclient->before = queue.lead;
+    newclient->next = current_first;
+    queue.lead->next = newclient;
+    current_first->before = newclient;
+    newclient->clientsockfd = clientsockfd;
+    sem_post(&queue.mutex);
+    sem_post(&queue.length);
   }
 
+  // finalization code. Will never be reached
   close(serversockfd);
+  for (int i = 0; i < worker_queue_count; i++) {
+    pthread_join(workers[i], NULL);
+  }
 }
 
 int main(int argc, char* argv[]) {
   int server_port;
+  int worker_count;
 
-  if (argc < 2) {
-    fprintf(stderr, "usage %s server_port\n", argv[0]);
+  if (argc < 3) {
+    fprintf(stderr, "usage %s server_port worker_count\n", argv[0]);
     exit(0);
   }
   server_port = atoi(argv[1]);
+  worker_count = atoi(argv[2]);
 
-  // create pruning table
-  printf("Loading pruning table...\n");
-  PruningTable table;
-  table.allocate();
-  table.load_from_file("pruning_table.bin");
-  printf("Loaded pruning table\n");
-
-  start_server(server_port, &table);
+  start_server(server_port, worker_count);
 }
