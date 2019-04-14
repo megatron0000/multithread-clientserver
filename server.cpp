@@ -104,12 +104,18 @@ void* handle_client_worker(void* worker_args) {
 
     printf("Server received %s\n", buffer);
 
-    // solve the received cube
+    // receive the cube. Take care with \0
     string hash = "";
-    for (int i = 0; buffer[i] != '\0'; i++) {
-      hash = hash + buffer[i];
+    int count = -1;
+    do {
+      count++;
+      hash = hash + buffer[count];
+    } while (buffer[count] != '\0' && count < MAX_PAYLOAD_SIZE - 1);
+    if (count == MAX_PAYLOAD_SIZE - 1) {
+      error("ERROR did not receive \\0 terminator");
     }
 
+    // solve the received cube
     auto scrambled_cube = Hash2Permutation(hash);
     auto solution = solver.solve(scrambled_cube);
 

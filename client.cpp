@@ -164,7 +164,9 @@ void* connection_loop(void* args) {
       error("ERROR writing to socket");
     }
 
-    recv(sockfd, buffer, MAX_PAYLOAD_SIZE, MSG_WAITALL);
+    if (recv(sockfd, buffer, MAX_PAYLOAD_SIZE, MSG_WAITALL) < 0) {
+      error("ERROR on receive from socket");
+    }
 
     printf("Client received %s\n", buffer);
 
