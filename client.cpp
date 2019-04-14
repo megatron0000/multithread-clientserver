@@ -102,7 +102,7 @@ vector<Permutation> parse_moves(char* moves) {
  * (one at a time) connections to it.
  *
  * On every successfully closed connection, 'request_count'
- * is incremented by the thread, using 'mutex' to avoid
+ * is incremented by the thread, using 'request_count_lock' to avoid
  * sync problems.
  *
  * 'should_stop' is set by the main thread when it wants
@@ -113,14 +113,15 @@ struct connection_loop_arg_t {
   int server_port;
   char* server_hostname;
   int request_count;
-  sem_t mutex;
+  sem_t request_count_lock;
   bool should_stop;
 };
 
 void* connection_loop(void* args) {
   int server_port = ((connection_loop_arg_t*)args)->server_port;
   char* server_hostname = ((connection_loop_arg_t*)args)->server_hostname;
-  sem_t* mutex = &((connection_loop_arg_t*)args)->mutex;
+  sem_t* request_count_lock =
+      &((connection_loop_arg_t*)args)->request_count_lock;
   int* request_count = &((connection_loop_arg_t*)args)->request_count;
   bool* should_stop = &((connection_loop_arg_t*)args)->should_stop;
   struct sockaddr_in serv_addr;
@@ -182,9 +183,9 @@ void* connection_loop(void* args) {
 
     close(sockfd);
 
-    sem_wait(mutex);
+    sem_wait(request_count_lock);
     *request_count += 1;
-    sem_post(mutex);
+    sem_post(request_count_lock);
 
     // stop if the main thread signaled so
     if (*should_stop) {
@@ -221,20 +222,16 @@ int main(int argc, char* argv[]) {
   args.server_hostname = server_hostname;
   args.request_count = 0;
   args.should_stop = false;
-  // start with 0 to block workers
-  sem_init(&args.mutex, 1, 0);
-
-  for (int i = 0; i < client_count; i++) {
-    pthread_create(&threads[i], NULL, connection_loop, &args);
-  }
+  sem_init(&args.request_count_lock, 1, 1);
 
   struct timeval start;
   if (gettimeofday(&start, 0) != 0) {
     error("ERROR on acquire time");
   }
 
-  // unlock to let workers run
-  sem_post(&args.mutex);
+  for (int i = 0; i < client_count; i++) {
+    pthread_create(&threads[i], NULL, connection_loop, &args);
+  }
 
   // capture data for about 'duration_seconds' seconds
   usleep(duration_seconds * 1000000);
