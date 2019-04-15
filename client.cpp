@@ -28,6 +28,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <iomanip>
 
 #include "rubik-optimal/src/hash.cpp"
 
@@ -253,6 +254,11 @@ int main(int argc, char* argv[]) {
 
   cout << "Ran for " << elapsed << " milliseconds;" << endl;
   cout << "Processed " << args.request_count << " requests;" << endl;
+  cout << "Average of ";
+  cout << fixed;
+  cout << setprecision(3);
+  cout << elapsed / args.request_count;
+  cout << " milliseconds per request" << endl;
 
   return 0;
 }
