@@ -100,19 +100,24 @@ void* handle_client_worker(void* worker_args) {
     int clientsockfd = oldlast->clientsockfd;
     free(oldlast);
 
-    recv(clientsockfd, buffer, MAX_PAYLOAD_SIZE, MSG_WAITALL);
+    if (recv(clientsockfd, buffer, MAX_PAYLOAD_SIZE, MSG_WAITALL) < 0) {
+      error("ERROR in receive from socket");
+    }
 
     printf("Server received %s\n", buffer);
 
     // receive the cube. Take care with \0
     string hash = "";
-    int count = -1;
-    do {
-      count++;
+    int count = 0;
+    while (true) {
+      if (buffer[count] == '\0') {
+        break;
+      }
+      if (count == MAX_PAYLOAD_SIZE) {
+        error("ERROR did not receive \\0 terminator");
+      }
       hash = hash + buffer[count];
-    } while (buffer[count] != '\0' && count < MAX_PAYLOAD_SIZE - 1);
-    if (count == MAX_PAYLOAD_SIZE - 1) {
-      error("ERROR did not receive \\0 terminator");
+      count++;
     }
 
     // solve the received cube
@@ -133,7 +138,7 @@ void* handle_client_worker(void* worker_args) {
   }
 }
 
-void start_server(int server_port, int worker_queue_count) {
+void start_server(int server_port, int worker_count) {
   struct sockaddr_in serv_addr;
   int serversockfd;
   int clientsockfd;
@@ -171,11 +176,11 @@ void start_server(int server_port, int worker_queue_count) {
 
   // create worker threads
   pthread_t* workers =
-      (pthread_t*)malloc(worker_queue_count * sizeof(pthread_t));
+      (pthread_t*)malloc(worker_count * sizeof(pthread_t));
   struct worker_args args;
   args.client_queue = &queue;
   args.pruning_table = &table;
-  for (int i = 0; i < worker_queue_count; i++) {
+  for (int i = 0; i < worker_count; i++) {
     pthread_create(&workers[i], NULL, handle_client_worker, (void*)&args);
   }
 
@@ -204,7 +209,7 @@ void start_server(int server_port, int worker_queue_count) {
 
   // finalization code. Will never be reached
   close(serversockfd);
-  for (int i = 0; i < worker_queue_count; i++) {
+  for (int i = 0; i < worker_count; i++) {
     pthread_join(workers[i], NULL);
   }
 }

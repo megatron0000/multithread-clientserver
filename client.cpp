@@ -46,6 +46,9 @@ float timedifference_msec(struct timeval t0, struct timeval t1) {
          (t1.tv_usec - t0.tv_usec) / 1000.0f;
 }
 
+/**
+ * Not thread safe !!
+ */
 struct sockaddr_in preconnection_setup(int server_port, char* server_hostname) {
   struct hostent* server_host;
   struct sockaddr_in serv_addr;
@@ -110,16 +113,15 @@ vector<Permutation> parse_moves(char* moves) {
  *
  */
 struct connection_loop_arg_t {
-  int server_port;
-  char* server_hostname;
+  struct sockaddr_in server_address;
   int request_count;
   sem_t request_count_lock;
   bool should_stop;
 };
 
 void* connection_loop(void* args) {
-  int server_port = ((connection_loop_arg_t*)args)->server_port;
-  char* server_hostname = ((connection_loop_arg_t*)args)->server_hostname;
+  struct sockaddr_in server_address =
+      ((connection_loop_arg_t*)args)->server_address;
   sem_t* request_count_lock =
       &((connection_loop_arg_t*)args)->request_count_lock;
   int* request_count = &((connection_loop_arg_t*)args)->request_count;
@@ -127,8 +129,6 @@ void* connection_loop(void* args) {
   struct sockaddr_in serv_addr;
   int sockfd;
   char* buffer;
-
-  serv_addr = preconnection_setup(server_port, server_hostname);
 
   buffer = (char*)malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 
@@ -157,7 +157,8 @@ void* connection_loop(void* args) {
     }
     buffer[hash.length()] = '\0';
 
-    if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+    if (connect(sockfd, (struct sockaddr*)&server_address,
+                sizeof(server_address)) < 0) {
       error("ERROR connecting");
     }
 
@@ -218,8 +219,7 @@ int main(int argc, char* argv[]) {
 
   // setup args for worker threads
   connection_loop_arg_t args;
-  args.server_port = server_port;
-  args.server_hostname = server_hostname;
+  args.server_address = preconnection_setup(server_port, server_hostname);
   args.request_count = 0;
   args.should_stop = false;
   sem_init(&args.request_count_lock, 1, 1);
